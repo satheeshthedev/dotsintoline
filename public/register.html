@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Register · Dots into Line</title>
+  <link rel="icon" href="/img/logo.svg">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+</head>
+<body>
+  <div class="paint-bg" aria-hidden="true"><i class="blob b1"></i><i class="blob b2"></i><i class="blob b3"></i><i class="blob b4"></i></div>
+  <header class="site-header">
+    <div class="wrap">
+      <a class="brand" href="/"><img src="/img/logo.svg" alt=""><span>Dots into Line</span></a>
+      <a class="nav-link" href="/#meetups">← All meetups</a>
+    </div>
+  </header>
+
+  <main class="wrap register-page" id="root">
+    <div class="skeleton"></div>
+  </main>
+
+  <template id="page">
+    <div class="register-grid">
+      <!-- left: meetup details -->
+      <section class="reg-card reg-details">
+        <div class="reg-poster" data-poster hidden><img alt=""></div>
+        <div class="reg-pad">
+          <div class="eyebrow">Meetup details</div>
+          <h1 class="reg-title" data-title></h1>
+          <ul class="reg-facts">
+            <li><span>📅</span><b data-date></b></li>
+            <li data-venue-row><span>📍</span><b data-venue></b></li>
+          </ul>
+          <p class="event-desc" data-desc></p>
+          <div class="bring" data-bring hidden><b>Bring along:</b> <span></span></div>
+        </div>
+      </section>
+
+      <!-- right: form + payment -->
+      <section class="reg-card">
+        <form class="reg-pad reg-form" id="reg-form" novalidate>
+          <div class="reg-step"><i>1</i> Choose your time</div>
+          <div class="slot-pick" data-slots role="radiogroup" aria-label="Time slot"></div>
+
+          <div class="reg-step"><i>2</i> Your details</div>
+          <div class="field">
+            <label for="f-name">Full name</label>
+            <input id="f-name" name="name" autocomplete="name" required maxlength="80" placeholder="Your name">
+          </div>
+          <div class="field">
+            <label for="f-email">Email</label>
+            <input id="f-email" name="email" type="email" autocomplete="email" required maxlength="120" placeholder="you@example.com">
+            <span class="hint">Your QR ticket will be sent to this email.</span>
+          </div>
+          <div class="field">
+            <label for="f-phone">Mobile number</label>
+            <input id="f-phone" name="phone" type="tel" inputmode="numeric" autocomplete="tel" required placeholder="10-digit number">
+          </div>
+
+          <div class="reg-step"><i>3</i> Confirm</div>
+          <div class="summary">
+            <div><div data-sum-slot></div><div class="muted-sm" data-sum-label></div></div>
+            <b data-sum-price></b>
+          </div>
+          <div class="form-error" id="form-error" role="alert"></div>
+          <button class="btn red big block shine" id="pay-btn" type="submit">Register <span class="arrow">→</span></button>
+          <div class="secure-note">Your QR ticket will be emailed to you right away.</div>
+        </form>
+      </section>
+    </div>
+  </template>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/register.js"></script>
+</body>
+</html>
