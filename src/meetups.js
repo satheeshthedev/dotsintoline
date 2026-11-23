@@ -5,8 +5,8 @@
 module.exports = [
   {
     id: 1,
-    title: 'Art Meetup',
-    description: 'An evening of making art together. Bring your sketchbook, colours or anything you love to create with. No rules, no pressure, just art.',
+    title: 'Art Workshop',
+    description: 'An evening art workshop: learn, create and meet fellow artists. No experience needed. No rules, no pressure, just art.',
     venue: 'Rock Beach, Puducherry',
     map_url: 'https://maps.google.com/?q=Rock+Beach+Puducherry',
     event_date: '2026-12-02', // Wednesday
@@ -14,7 +14,7 @@ module.exports = [
     what_to_bring: '',
     published: 1,
     slots: [
-      { id: 1, label: 'Evening session', start_time: '19:00', end_time: '22:00', capacity: 30, price: 149 },
+      { id: 1, label: 'Workshop', start_time: '19:00', end_time: '22:00', capacity: 30, price: 149 },
     ],
   },
 ];
