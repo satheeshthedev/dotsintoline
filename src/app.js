@@ -7,7 +7,9 @@ const path = require('path');
 const crypto = require('crypto');
 const express = require('express');
 
-const { q, ensureSchema, insertBookingIfSeat, searchBookings, HOLD_MINUTES } = require('./db');
+const db = require('./db');
+const { q, ensureSchema, insertBookingIfSeat, searchBookings, HOLD_MINUTES } = db;
+const MEETUPS = require('./meetups');
 const cashfree = require('./cashfree');
 const auth = require('./auth');
 const tickets = require('./tickets');
@@ -99,8 +101,14 @@ async function syncWithCashfree(booking) {
   return booking; // ACTIVE — not paid yet
 }
 
-// Create tables on first API call (cheap no-op afterwards)
-app.use('/api', wrap(async (req, res, next) => { await ensureSchema(); next(); }));
+// Create tables on first API call (cheap no-op afterwards). Without a database, pages still show the hard-coded meetups.
+app.use('/api', wrap(async (req, res, next) => { if (db.configured()) await ensureSchema(); next(); }));
+
+/** Hard-coded meetups (src/meetups.js), used when no database is connected. */
+const fallbackEvents = () => MEETUPS
+  .filter((e) => e.published && e.event_date >= todayIST())
+  .sort((a, b) => a.event_date.localeCompare(b.event_date))
+  .map(({ slots, ...e }) => ({ ...e, slots: slots.map((s) => publicSlot({ ...s, taken: 0 })) }));
 
 // ---------- Cashfree webhook (needs the raw body for signature check) ----------
 app.post('/api/payments/webhook', express.raw({ type: '*/*', limit: '1mb' }), wrap(async (req, res) => {
@@ -126,11 +134,17 @@ app.get('/api/config', (req, res) => {
 });
 
 app.get('/api/events', wrap(async (req, res) => {
+  if (!db.configured()) return res.json(fallbackEvents());
   const events = await q.publicEvents.all(todayIST());
   res.json(await Promise.all(events.map(publicEvent)));
 }));
 
 app.get('/api/events/:id', wrap(async (req, res) => {
+  if (!db.configured()) {
+    const e = fallbackEvents().find((x) => String(x.id) === String(req.params.id));
+    if (!e) throw new HttpError(404, 'This meetup was not found.');
+    return res.json(e);
+  }
   const e = await q.event.get(req.params.id);
   if (!e || !e.published) throw new HttpError(404, 'This meetup was not found.');
   if (e.event_date < todayIST()) throw new HttpError(410, 'This meetup has already happened.');

@@ -4,9 +4,14 @@ const { neon } = require('@neondatabase/serverless');
 const DATABASE_URL = process.env.DATABASE_URL || process.env.NETLIFY_DATABASE_URL || process.env.POSTGRES_URL;
 const HOLD_MINUTES = Math.max(1, Math.floor(Number(process.env.HOLD_MINUTES || 20)));
 
+const configured = () => Boolean(DATABASE_URL);
+
 let sql = null;
 function client() {
-  if (!DATABASE_URL) throw Object.assign(new Error('DATABASE_URL is not set. Add your Neon Postgres connection string.'), { status: 503, expose: true });
+  if (!DATABASE_URL) {
+    console.error('[db] DATABASE_URL is not set — connect a Neon Postgres database.');
+    throw Object.assign(new Error('Registrations are opening soon. Please try again in a little while.'), { status: 503, expose: true });
+  }
   return (sql ||= neon(DATABASE_URL));
 }
 const query = (text, params = []) => client().query(text, params);
@@ -55,7 +60,29 @@ const SCHEMA = [
 ];
 let schemaReady = null;
 function ensureSchema() {
-  return (schemaReady ||= (async () => { for (const s of SCHEMA) await query(s); })().catch((e) => { schemaReady = null; throw e; }));
+  return (schemaReady ||= (async () => {
+    for (const s of SCHEMA) await query(s);
+    await seedHardcodedMeetups();
+  })().catch((e) => { schemaReady = null; throw e; }));
+}
+
+/** First run on an empty database: copy the hard-coded meetups in, keeping their ids so links stay the same. */
+async function seedHardcodedMeetups() {
+  const { n } = await one(`SELECT COUNT(*)::int AS n FROM events`);
+  if (n > 0) return;
+  const meetups = require('./meetups');
+  for (const e of meetups) {
+    await query(`INSERT INTO events (id, ${EVENT_COLS.join(', ')}) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
+      [e.id, ...EVENT_COLS.map((k) => e[k])]);
+    for (const s of e.slots) {
+      await query(`INSERT INTO slots (id, event_id, ${SLOT_COLS.join(', ')}) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING`,
+        [s.id, e.id, ...SLOT_COLS.map((k) => s[k])]);
+    }
+  }
+  // keep the id counters ahead of the ids we inserted by hand
+  await query(`SELECT setval(pg_get_serial_sequence('events', 'id'), GREATEST((SELECT MAX(id) FROM events), 1))`);
+  await query(`SELECT setval(pg_get_serial_sequence('slots', 'id'), GREATEST((SELECT MAX(id) FROM slots), 1))`);
+  console.log(`[db] added ${meetups.length} hard-coded meetup(s) to the empty database`);
 }
 
 // seats held = paid + recent unpaid (someone is on the payment page)
@@ -167,4 +194,4 @@ async function searchBookings({ eventId, status, search }) {
     ORDER BY e.event_date DESC, s.start_time, b.created_at DESC LIMIT 2000`, params);
 }
 
-module.exports = { q, query, ensureSchema, insertBookingIfSeat, searchBookings, HOLD_MINUTES };
+module.exports = { q, query, configured, ensureSchema, insertBookingIfSeat, searchBookings, HOLD_MINUTES };
