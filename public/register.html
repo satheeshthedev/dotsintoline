@@ -61,19 +61,20 @@
             <input id="f-phone" name="phone" type="tel" inputmode="numeric" autocomplete="tel" required placeholder="10-digit number">
           </div>
 
-          <div class="reg-step"><i>3</i> Confirm</div>
+          <div class="reg-step"><i>3</i> Payment</div>
           <div class="summary">
             <div><div data-sum-slot></div><div class="muted-sm" data-sum-label></div></div>
             <b data-sum-price></b>
           </div>
           <div class="form-error" id="form-error" role="alert"></div>
-          <button class="btn red big block shine" id="pay-btn" type="submit">Register <span class="arrow">→</span></button>
-          <div class="secure-note">Your QR ticket will be emailed to you right away.</div>
+          <button class="btn red big block shine" id="pay-btn" type="submit">Pay now</button>
+          <div class="secure-note" data-secure>🔒 Secure payment by Cashfree · UPI, cards, netbanking</div>
         </form>
       </section>
     </div>
   </template>
 
+  <script src="https://sdk.cashfree.com/js/v3/cashfree.js"></script>
   <script src="/js/common.js"></script>
   <script src="/js/register.js"></script>
 </body>

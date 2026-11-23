@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin login · Dots into Line</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="/img/logo.svg">
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body>
+  <main class="login">
+    <form id="login">
+      <img src="/img/logo.svg" alt="">
+      <h1>Admin</h1>
+      <div class="field">
+        <label for="pw">Password</label>
+        <input id="pw" type="password" autocomplete="current-password" required autofocus>
+      </div>
+      <div class="form-error" id="err" role="alert"></div>
+      <button class="btn block" type="submit">Log in</button>
+    </form>
+  </main>
+  <script src="/js/common.js"></script>
+  <script>
+    const next = new URLSearchParams(location.search).get('next');
+    document.getElementById('login').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const err = document.getElementById('err');
+      err.classList.remove('show');
+      try {
+        await DIL.api('/api/admin/login', { body: { password: document.getElementById('pw').value } });
+        location.href = next && next.startsWith('/admin/') ? next : '/admin/';
+      } catch (ex) {
+        err.textContent = ex.message;
+        err.classList.add('show');
+      }
+    });
+  </script>
+</body>
+</html>

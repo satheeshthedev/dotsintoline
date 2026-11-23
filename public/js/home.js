@@ -1,5 +1,5 @@
 (() => {
-  const { api, esc, fmtDate, fmtRange } = DIL;
+  const { api, esc, fmtDate, fmtRange, rupees } = DIL;
   const eventsEl = document.getElementById('events');
   let config = {};
   let events = [];
@@ -10,7 +10,7 @@
     const inner = `
       <span class="time">${fmtRange(s.start_time, s.end_time)}</span>
       <span class="label">${esc(s.label)}</span>
-      <span class="foot"><span class="price">${s.capacity} seats</span>
+      <span class="foot"><span class="price">${rupees(s.price)}</span>
         <span class="left ${low ? 'low' : ''}">${full ? 'Full' : `${s.seats_left} spot${s.seats_left === 1 ? '' : 's'} left`}</span></span>
       <span class="slot-cta">${full ? 'Fully booked' : 'Register <span class="arrow">→</span>'}</span>`;
     return full

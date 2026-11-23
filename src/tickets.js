@@ -70,6 +70,7 @@ function ticketEmailHtml(b, baseUrl) {
       ${row('Slot', slot)}
       ${row('Venue', b.map_url ? `<a href="${esc(b.map_url)}" style="color:#c2462e">${esc(b.venue)}</a>` : esc(b.venue))}
       ${row('Name', esc(b.name))}
+      ${row('Paid', b.amount > 0 ? `₹${b.amount}` : 'Free')}
     </table>
   </td></tr>
   ${b.what_to_bring ? `<tr><td style="padding:6px 28px"><div style="background:#f6efe3;border-radius:12px;padding:12px 14px;font-size:14px;color:#5b5246"><b style="color:#1f1b16">Bring along:</b> ${esc(b.what_to_bring)}</div></td></tr>` : ''}

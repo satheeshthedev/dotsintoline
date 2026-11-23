@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Admin · Dots into Line</title>
+  <meta name="robots" content="noindex">
+  <link rel="icon" href="/img/logo.svg">
+  <link href="https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/admin.css">
+</head>
+<body class="admin">
+  <header class="admin-bar">
+    <div class="wrap">
+      <a class="brand" href="/admin/"><img src="/img/logo.svg" alt=""><span>Dots into Line</span><small>admin</small></a>
+      <nav>
+        <a class="btn red" href="/admin/scan.html">📷 Scan QR</a>
+        <a class="btn soft" href="/" target="_blank">Site</a>
+        <button class="btn soft" id="logout">Log out</button>
+      </nav>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <div id="setup-warn"></div>
+    <div class="tabs" role="tablist">
+      <button role="tab" aria-selected="true" data-tab="overview">Overview</button>
+      <button role="tab" aria-selected="false" data-tab="events">Events &amp; slots</button>
+      <button role="tab" aria-selected="false" data-tab="bookings">Bookings</button>
+    </div>
+
+    <section data-panel="overview" id="overview"></section>
+
+    <section data-panel="events" hidden>
+      <div class="panel-head">
+        <div><h3>Events</h3><div class="sub">Create a meetup, then add time slots with capacity and price.</div></div>
+        <button class="btn" id="new-event">+ New event</button>
+      </div>
+      <div id="event-list"></div>
+    </section>
+
+    <section data-panel="bookings" hidden>
+      <div class="panel">
+        <div class="filters">
+          <select id="b-event"><option value="">All events</option></select>
+          <select id="b-status">
+            <option value="paid">Paid</option>
+            <option value="checked_in">Checked in</option>
+            <option value="not_checked_in">Paid, not checked in</option>
+            <option value="pending">Pending payment</option>
+            <option value="failed">Failed</option>
+            <option value="">All</option>
+          </select>
+          <input id="b-search" type="search" placeholder="Search name, email, phone, code…">
+          <a class="btn ghost" id="b-csv" href="#" style="flex:0 0 auto">Export CSV</a>
+        </div>
+        <div class="muted" id="b-count" style="margin-bottom:8px"></div>
+        <div class="table-scroll"><table class="data" id="b-table"></table></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- event editor -->
+  <dialog id="event-dialog" class="wide">
+    <form id="event-form">
+      <div class="modal-head"><h2 id="event-dialog-title">New event</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></div>
+      <div class="modal-body">
+        <div class="field"><label>Title</label><input name="title" required maxlength="120" placeholder="Art Meetup — Veerampattinam Beach"></div>
+        <div class="grid2">
+          <div class="field"><label>Date</label><input name="event_date" type="date" required></div>
+          <div class="field"><label>Venue</label><input name="venue" maxlength="200" placeholder="Rock Beach, Puducherry"></div>
+        </div>
+        <div class="field"><label>Google Maps link <span class="muted">(optional)</span></label><input name="map_url" type="url" placeholder="https://maps.app.goo.gl/…"></div>
+        <div class="field"><label>Poster image URL <span class="muted">(optional)</span></label><input name="poster_url" placeholder="/img/posters/nov-22.jpg or https://…"><span class="hint">Put images in public/img/posters/ and use /img/posters/filename.jpg</span></div>
+        <div class="field"><label>Description</label><textarea name="description" rows="3" maxlength="3000"></textarea></div>
+        <div class="field"><label>What to bring <span class="muted">(shown on site &amp; ticket)</span></label><input name="what_to_bring" maxlength="500" placeholder="Bring your own art materials"></div>
+        <label class="check"><input type="checkbox" name="published" checked> Published (visible on the site)</label>
+        <div class="form-error" data-err></div>
+        <button class="btn block" type="submit">Save event</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- slot editor -->
+  <dialog id="slot-dialog">
+    <form id="slot-form">
+      <div class="modal-head"><h2 id="slot-dialog-title">New slot</h2><button type="button" class="icon-btn" data-close aria-label="Close">✕</button></div>
+      <div class="modal-body">
+        <div class="field"><label>Label <span class="muted">(optional)</span></label><input name="label" maxlength="60" placeholder="Morning batch"></div>
+        <div class="grid2">
+          <div class="field"><label>Start</label><input name="start_time" type="time" required></div>
+          <div class="field"><label>End</label><input name="end_time" type="time" required></div>
+        </div>
+        <div class="grid2">
+          <div class="field"><label>Capacity</label><input name="capacity" type="number" min="1" step="1" required value="25"></div>
+          <div class="field"><label>Price (₹)</label><input name="price" type="number" min="0" step="1" required value="0"><span class="hint">0 = free</span></div>
+        </div>
+        <div class="form-error" data-err></div>
+        <button class="btn block" type="submit">Save slot</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="/js/common.js"></script>
+  <script src="/js/admin.js"></script>
+</body>
+</html>

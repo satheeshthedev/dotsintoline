@@ -1,5 +1,5 @@
 (() => {
-  const { api, esc, fmtDate, fmtRange } = DIL;
+  const { api, esc, fmtDate, fmtRange, rupees } = DIL;
   const root = document.getElementById('root');
   const orderId = new URLSearchParams(location.search).get('order_id');
   let polls = 0;
@@ -11,6 +11,7 @@
       <div><dt>Slot</dt><dd>${fmtRange(b.slot.start_time, b.slot.end_time)}${b.slot.label ? ` · ${esc(b.slot.label)}` : ''}</dd></div>
       ${b.event.venue ? `<div><dt>Venue</dt><dd>${b.event.map_url ? `<a href="${esc(b.event.map_url)}" target="_blank" rel="noopener">${esc(b.event.venue)}</a>` : esc(b.event.venue)}</dd></div>` : ''}
       <div><dt>Name</dt><dd>${esc(b.name)}</dd></div>
+      <div><dt>Amount</dt><dd>${rupees(b.amount)}</dd></div>
       ${b.event.what_to_bring ? `<div><dt>Bring</dt><dd style="font-weight:500">${esc(b.event.what_to_bring)}</dd></div>` : ''}
     </dl>`;
 
@@ -38,20 +39,53 @@
       return;
     }
 
+    if (b.status === 'pending') {
+      const stillChecking = polls < 6;
+      root.innerHTML = `
+        <div class="ticket"><div class="ticket-top">
+          <div class="status-icon wait">${stillChecking ? '<div class="spinner"></div>' : '!'}</div>
+          <h1>${stillChecking ? 'Confirming…' : 'Payment not completed'}</h1>
+          <p>${stillChecking ? 'Hang on, we are confirming your payment.' : 'We haven’t received your payment yet. If money was debited, it will be confirmed automatically in a few minutes — refresh this page.'}</p>
+        </div>
+        <div class="perf"></div>${details(b)}</div>
+        ${stillChecking ? '' : `<div class="ticket-actions">
+          <button class="btn" id="retry">Try paying again</button>
+          <button class="btn ghost" onclick="location.reload()">Refresh status</button>
+        </div>`}`;
+      const retry = document.getElementById('retry');
+      if (retry) retry.addEventListener('click', () => retryPayment(retry));
+      return;
+    }
+
     root.innerHTML = `
       <div class="ticket"><div class="ticket-top">
         <div class="status-icon bad">✕</div>
-        <h1>Not confirmed</h1>
-        <p>This registration wasn't completed and no ticket was issued. Please register again.</p>
+        <h1>Payment failed</h1>
+        <p>This booking wasn't completed and no ticket was issued. If money was debited, it will be refunded by your bank.</p>
       </div><div class="perf"></div>${details(b)}</div>
-      <div class="ticket-actions"><a class="btn" href="/#meetups">Register again</a></div>`;
+      <div class="ticket-actions"><a class="btn" href="/#meetups">Book again</a></div>`;
+  }
+
+  async function retryPayment(btn) {
+    btn.disabled = true;
+    try {
+      const [{ cashfreeMode }, { paymentSessionId }] = await Promise.all([
+        api('/api/config'),
+        api(`/api/bookings/${encodeURIComponent(orderId)}/retry`, { method: 'POST' }),
+      ]);
+      await Cashfree({ mode: cashfreeMode }).checkout({ paymentSessionId, redirectTarget: '_self' });
+    } catch (e) {
+      DIL.toast(e.message);
+      btn.disabled = false;
+    }
   }
 
   async function check() {
     try {
       const b = await api(`/api/bookings/${encodeURIComponent(orderId)}`);
       render(b);
-      if (b.status === 'paid' && !b.emailSent && polls++ < 8) setTimeout(check, 3000);
+      if (b.status === 'pending' && polls++ < 6) setTimeout(check, 2500);
+      else if (b.status === 'paid' && !b.emailSent && polls++ < 8) setTimeout(check, 3000);
     } catch (e) {
       root.innerHTML = `<div class="ticket"><div class="ticket-top"><div class="status-icon bad">?</div>
         <h1>Booking not found</h1><p>${esc(e.message)}</p></div></div>

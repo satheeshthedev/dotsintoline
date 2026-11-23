@@ -1,10 +1,11 @@
 (() => {
-  const { api, esc, fmtDate, fmtRange } = DIL;
+  const { api, esc, fmtDate, fmtRange, rupees } = DIL;
   const root = document.getElementById('root');
   const params = new URLSearchParams(location.search);
   const eventId = params.get('event');
   let slotId = Number(params.get('slot')) || null;
-    let event = null;
+  let config = { cashfreeMode: 'sandbox' };
+  let event = null;
 
   function fail(title, msg) {
     root.innerHTML = `<div class="empty" style="margin-top:20px"><h3>${esc(title)}</h3><p>${esc(msg)}</p>
@@ -14,7 +15,7 @@
   async function load() {
     try {
       let events;
-      events = await api('/api/events');
+      [config, events] = await Promise.all([api('/api/config'), api('/api/events')]);
       event = eventId
         ? events.find((e) => String(e.id) === String(eventId))
         // No meetup chosen: use the next upcoming one that still has seats.
@@ -57,7 +58,7 @@
         <span class="pick-body">
           <span class="time">${fmtRange(s.start_time, s.end_time)}</span>
           <span class="label">${esc(s.label)}</span>
-          <span class="foot"><b></b><span>${full ? 'Full' : `${s.seats_left} left`}</span></span>
+          <span class="foot"><b>${rupees(s.price)}</b><span>${full ? 'Full' : `${s.seats_left} left`}</span></span>
         </span>
       </label>`;
     }).join('');
@@ -78,7 +79,9 @@
     const $ = (sel) => root.querySelector(sel);
     $('[data-sum-slot]').textContent = `${fmtDate(event.event_date)} · ${fmtRange(s.start_time, s.end_time)}`;
     $('[data-sum-label]').textContent = s.label || '1 spot';
-    $('[data-sum-price]').textContent = 'Free';
+    $('[data-sum-price]').textContent = rupees(s.price);
+    $('#pay-btn').innerHTML = s.price > 0 ? `Pay ${rupees(s.price)} <span class="arrow">→</span>` : 'Confirm registration <span class="arrow">→</span>';
+    $('[data-secure]').hidden = s.price === 0;
     history.replaceState(null, '', `?event=${event.id}&slot=${s.id}`);
   }
 
@@ -104,10 +107,12 @@
 
     const label = payBtn.innerHTML;
     payBtn.disabled = true;
-    payBtn.textContent = 'Registering…';
+    payBtn.textContent = 'Opening payment…';
     try {
       const res = await api('/api/bookings', { body });
-      location.assign(`/status.html?order_id=${encodeURIComponent(res.orderId)}`);
+      if (res.free) return location.assign(`/status.html?order_id=${encodeURIComponent(res.orderId)}`);
+      if (typeof Cashfree !== 'function') throw new Error('Payment page could not load. Check your connection and try again.');
+      await Cashfree({ mode: config.cashfreeMode }).checkout({ paymentSessionId: res.paymentSessionId, redirectTarget: '_self' });
     } catch (err) {
       showError(err.message);
       payBtn.disabled = false;

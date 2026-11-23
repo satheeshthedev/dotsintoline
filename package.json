@@ -2,7 +2,7 @@
   "name": "dots-into-line",
   "version": "1.0.0",
   "private": true,
-  "description": "Free registration site for Dots into Line art meetups — Brevo email QR tickets (Phase 1)",
+  "description": "Slot booking site for Dots into Line art meetups — Cashfree payments, Brevo email tickets, QR check-in",
   "main": "src/server.js",
   "scripts": {
     "start": "node --disable-warning=ExperimentalWarning src/server.js",
