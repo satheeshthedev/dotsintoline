@@ -35,7 +35,8 @@ const DIL = (() => {
   /** SQLite "YYYY-MM-DD HH:MM:SS" (UTC) → local readable */
   function fmtStamp(s) {
     if (!s) return '';
-    const d = new Date(s.replace(' ', 'T') + 'Z');
+    // Postgres sends ISO strings ("2026-11-23T10:00:00.000Z"); older data may be "YYYY-MM-DD HH:MM:SS" (UTC)
+    const d = new Date(String(s).includes('T') ? s : String(s).replace(' ', 'T') + 'Z');
     return d.toLocaleString('en-IN', { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
   }
 

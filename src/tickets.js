@@ -84,7 +84,7 @@ function ticketEmailHtml(b, baseUrl) {
 
 /** Sends the QR ticket email for a paid booking id. Records success/failure on the booking. */
 async function sendTicketEmail(bookingId, baseUrl) {
-  const b = q.fullBooking.get(bookingId);
+  const b = await q.fullBooking.get(bookingId);
   if (!b || b.status !== 'paid' || !b.ticket_token) throw new Error('Booking is not paid');
   try {
     const png = await qrPng(b.ticket_token);
@@ -95,9 +95,9 @@ async function sendTicketEmail(bookingId, baseUrl) {
       html: ticketEmailHtml(b, baseUrl),
       attachments: [{ name: `DotsIntoLine-ticket-${b.ticket_token}.png`, content: png.toString('base64') }],
     });
-    q.emailOk.run(bookingId);
+    await q.emailOk.run(bookingId);
   } catch (err) {
-    q.emailErr.run(String(err.message).slice(0, 500), bookingId);
+    await q.emailErr.run(String(err.message).slice(0, 500), bookingId).catch(() => {});
     throw err;
   }
 }

@@ -7,7 +7,7 @@ Slot booking site for Dots into Line art meetups.
 - **Admin** (`/admin/`): create events and slots (capacity, price), see bookings, export CSV, resend tickets, and check people in manually.
 - **Scanner** (`/admin/scan.html`): open it on a phone at the entry, scan the QR, see the person's name and slot, then tap **Admit**. If a QR is scanned again, it shows **Already used** and the time of first check-in.
 
-Stack: Node.js 22 + Express, SQLite (Node's built-in `node:sqlite`, stored in `data/dots.db`), plain HTML/CSS/JS.
+Stack: Node.js 22 + Express, **Neon Postgres**, plain HTML/CSS/JS. Runs on **Netlify** or **Vercel** (the API runs as a serverless function, the pages are served from `public/`), or locally with `npm start`.
 
 ## Run locally
 
@@ -18,7 +18,7 @@ npm run seed              # optional: adds a sample meetup
 npm start                 # http://localhost:3000  ·  admin: http://localhost:3000/admin/
 ```
 
-Without Cashfree keys, only **free** slots (price 0) can be booked. Without a Brevo key, ticket emails are written to `data/outbox/` so you can open them in a browser.
+Without Cashfree keys, only **free** slots (price 0) can be booked. Without a Brevo key, ticket emails are written to `data/outbox/` locally (and not sent at all on Netlify/Vercel). Database tables are created automatically on the first request.
 
 ## Cashfree setup
 1. Sign up at the Cashfree Merchant Dashboard and go to **Developers → API Keys**. Copy the **App ID** and **Secret Key** into `CASHFREE_APP_ID` and `CASHFREE_SECRET_KEY`.
@@ -38,15 +38,29 @@ Without Cashfree keys, only **free** slots (price 0) can be booked. Without a Br
 - If someone has no phone or no network, type the code from their email into the box below the camera, or search for their name in **Admin → Bookings** and tap **Check in**.
 - The camera only works over **HTTPS** (or on `localhost`).
 
-## Deploying
-Deploy to any host that runs Node 22+ with a **persistent disk** for `data/`, such as a VPS, Railway or Render with a disk attached. Hosts without a persistent disk would lose the database on every deploy.
-- Set all `.env` values on the host. `BASE_URL` must be your public `https://` address.
+## Deploying on Netlify
+1. Go to **Add new project → Import an existing project → GitHub** and pick `satheeshthedev/dotsintoline`, branch `main`. Don't use Netlify Drop: it can't run the API.
+2. Build settings come from `netlify.toml` (publish `public`, functions `netlify/functions`). Leave the build command empty.
+3. **Database:** open the project's **Extensions → Netlify DB** and create a database. This sets `NETLIFY_DATABASE_URL`. Or create a free database at neon.tech and add `DATABASE_URL` yourself.
+4. **Project configuration → Environment variables:** add `ADMIN_PASSWORD`, `SESSION_SECRET`, `BREVO_API_KEY`, `MAIL_FROM_EMAIL` and `MAIL_FROM_NAME`. For phase 2, also add `CASHFREE_ENV`, `CASHFREE_APP_ID` and `CASHFREE_SECRET_KEY`.
+5. Redeploy, then open `/admin/` to create your meetups.
+
+## Deploying on Vercel
+1. Go to **Add New → Project → Import** and pick `satheeshthedev/dotsintoline`. Use the framework preset **Other**. `vercel.json` sets the output directory to `public` and routes `/api/*` to `api/index.js`.
+2. Go to **Storage → Create Database → Neon** (free) and connect it to the project. This sets `DATABASE_URL`.
+3. Under **Settings → Environment Variables**, add the same variables as Netlify step 4.
+4. Redeploy.
+
+On both hosts:
+- Set `BASE_URL` if you use a custom domain.
+- Add the site's domain under Cashfree's whitelisting.
+- The phone scanner works because both hosts serve over HTTPS.
 - Use a strong `ADMIN_PASSWORD` and a random `SESSION_SECRET`.
-- Back up `data/dots.db` regularly.
 
 ## Booking rules (built in)
 - A seat is held for `HOLD_MINUTES` (default 20) while someone pays. Unpaid holds free up automatically after that.
 - The same email can't book the same slot twice.
+- Seats are claimed inside a locked database transaction, so two people can't get the last seat at the same moment.
 - A slot can't be deleted, and its price can't change, once someone has paid. Unpublish the event instead.
 - Phone numbers must be valid 10-digit Indian mobile numbers (Cashfree requires a phone number).
 

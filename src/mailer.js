@@ -5,8 +5,12 @@ const path = require('path');
 async function sendEmail({ to, toName, subject, html, attachments = [] }) {
   if (!process.env.BREVO_API_KEY) {
     // Dev fallback: write the email to data/outbox so you can open it in a browser.
+    // (Serverless hosts have a read-only disk, so there we only log it.)
     const dir = path.join(__dirname, '..', 'data', 'outbox');
-    fs.mkdirSync(dir, { recursive: true });
+    try { fs.mkdirSync(dir, { recursive: true }); } catch {
+      console.warn(`[mail] BREVO_API_KEY not set — email to ${to} not sent`);
+      return { messageId: 'not-sent' };
+    }
     const file = path.join(dir, `${Date.now()}-${to.replace(/[^a-z0-9]/gi, '_')}.html`);
     fs.writeFileSync(file, html);
     for (const a of attachments) fs.writeFileSync(file.replace(/\.html$/, `-${a.name}`), Buffer.from(a.content, 'base64'));

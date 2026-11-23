@@ -5,16 +5,18 @@
   "description": "Slot booking site for Dots into Line art meetups — Cashfree payments, Brevo email tickets, QR check-in",
   "main": "src/server.js",
   "scripts": {
-    "start": "node --disable-warning=ExperimentalWarning src/server.js",
-    "dev": "node --disable-warning=ExperimentalWarning --watch src/server.js",
-    "seed": "node --disable-warning=ExperimentalWarning src/seed.js"
+    "start": "node src/server.js",
+    "dev": "node --watch src/server.js",
+    "seed": "node src/seed.js"
   },
   "engines": {
     "node": ">=22.13"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.2.1",
     "dotenv": "^18.0.10",
     "express": "^4.22.3",
-    "qrcode": "^1.5.4"
+    "qrcode": "^1.5.4",
+    "serverless-http": "^4.0.0"
   }
 }

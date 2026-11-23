@@ -5,8 +5,10 @@ const SESSION_HOURS = 12;
 
 let secret = process.env.SESSION_SECRET;
 if (!secret || secret.startsWith('replace-')) {
-  secret = crypto.randomBytes(32).toString('hex');
-  console.warn('[auth] SESSION_SECRET not set — using a random one (admins will be logged out on restart).');
+  // Serverless hosts run many short-lived copies, so the secret must be identical in all of them.
+  // Fall back to one derived from the admin password (set SESSION_SECRET in production).
+  secret = crypto.createHash('sha256').update('dil-session:' + (process.env.ADMIN_PASSWORD || crypto.randomBytes(16).toString('hex'))).digest('hex');
+  console.warn('[auth] SESSION_SECRET not set — deriving one from ADMIN_PASSWORD.');
 }
 
 const sign = (v) => crypto.createHmac('sha256', secret).update(v).digest('base64url');

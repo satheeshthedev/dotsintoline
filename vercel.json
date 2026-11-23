@@ -1,0 +1,9 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": null,
+  "buildCommand": "",
+  "outputDirectory": "public",
+  "rewrites": [{ "source": "/api/(.*)", "destination": "/api" }],
+  "redirects": [{ "source": "/admin", "destination": "/admin/", "permanent": false }],
+  "functions": { "api/index.js": { "maxDuration": 30, "includeFiles": "src/**" } }
+}
