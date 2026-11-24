@@ -42,7 +42,8 @@ function formatTime(hhmm) {
 }
 
 function ticketEmailHtml(b, baseUrl) {
-  const qrUrl = `${baseUrl}/api/tickets/${b.ticket_token}/qr.png`;
+  // Gmail fetches images from its own servers, so a localhost (or blocked) URL shows as a broken image.
+  // The PNG is attached and referenced here so the QR renders inside the message.
   const statusUrl = `${baseUrl}/status.html?order_id=${encodeURIComponent(b.order_id)}`;
   const slot = `${formatTime(b.start_time)} – ${formatTime(b.end_time)}${b.slot_label ? ` · ${esc(b.slot_label)}` : ''}`;
   const insta = process.env.INSTAGRAM_URL || 'https://www.instagram.com/dots.into_line/';
@@ -59,7 +60,7 @@ function ticketEmailHtml(b, baseUrl) {
     <p style="margin:0;color:#5b5246;font-size:15px">Your spot is confirmed. Show this QR at the entry.</p>
   </td></tr>
   <tr><td style="padding:18px 28px;text-align:center">
-    <img src="${qrUrl}" width="240" height="240" alt="Your entry QR code" style="display:block;margin:0 auto;border:1px solid #e8dcc6;border-radius:12px">
+    <img src="cid:ticket-qr.png" width="240" height="240" alt="Your entry QR code" style="display:block;margin:0 auto;border:1px solid #e8dcc6;border-radius:12px">
     <div style="margin-top:10px;font-family:'Courier New',monospace;font-size:20px;letter-spacing:2px;color:#1f1b16;font-weight:700">${prettyCode(b.ticket_token)}</div>
     <div style="font-size:12px;color:#7a6f60;margin-top:4px">QR not showing? It's also attached to this email.</div>
   </td></tr>
@@ -93,7 +94,7 @@ async function sendTicketEmail(bookingId, baseUrl) {
       toName: b.name,
       subject: `Your ticket: ${b.event_title} · ${formatDate(b.event_date)}`,
       html: ticketEmailHtml(b, baseUrl),
-      attachments: [{ name: `DotsIntoLine-ticket-${b.ticket_token}.png`, content: png.toString('base64') }],
+      attachments: [{ name: 'ticket-qr.png', content: png.toString('base64') }],
     });
     await q.emailOk.run(bookingId);
   } catch (err) {

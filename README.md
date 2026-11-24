@@ -7,7 +7,7 @@ Slot booking site for Dots into Line art meetups.
 - **Admin** (`/admin/`): create events and slots (capacity, price), see bookings, export CSV, resend tickets, and check people in manually.
 - **Scanner** (`/admin/scan.html`): open it on a phone at the entry, scan the QR, see the person's name and slot, then tap **Admit**. If a QR is scanned again, it shows **Already used** and the time of first check-in.
 
-Stack: Node.js 22 + Express, **Neon Postgres**, plain HTML/CSS/JS. Runs on **Netlify** or **Vercel** (the API runs as a serverless function, the pages are served from `public/`), or locally with `npm start`.
+Stack: Node.js 22 + Express, **MongoDB Atlas**, plain HTML/CSS/JS. Runs on **Netlify** or **Vercel** (the API runs as a serverless function, the pages are served from `public/`), or locally with `npm start`. Without `MONGODB_URI`, local registration is saved in `data/store.json`.
 
 ## Run locally
 
@@ -41,13 +41,13 @@ Without Cashfree keys, only **free** slots (price 0) can be booked. Without a Br
 ## Deploying on Netlify
 1. Go to **Add new project → Import an existing project → GitHub** and pick `satheeshthedev/dotsintoline`, branch `main`. Don't use Netlify Drop: it can't run the API.
 2. Build settings come from `netlify.toml` (publish `public`, functions `netlify/functions`). Leave the build command empty.
-3. **Database:** open the project's **Extensions → Netlify DB** and create a database. This sets `NETLIFY_DATABASE_URL`. Or create a free database at neon.tech and add `DATABASE_URL` yourself.
+3. **Database:** create a free cluster at [MongoDB Atlas](https://www.mongodb.com/atlas), allow network access from `0.0.0.0/0`, and set `MONGODB_URI` to the driver connection string (database name `dotsintoline`).
 4. **Project configuration → Environment variables:** add `ADMIN_PASSWORD`, `SESSION_SECRET`, `BREVO_API_KEY`, `MAIL_FROM_EMAIL` and `MAIL_FROM_NAME`. For phase 2, also add `CASHFREE_ENV`, `CASHFREE_APP_ID` and `CASHFREE_SECRET_KEY`.
 5. Redeploy, then open `/admin/` to create your meetups.
 
 ## Deploying on Vercel
 1. Go to **Add New → Project → Import** and pick `satheeshthedev/dotsintoline`. Use the framework preset **Other**. `vercel.json` sets the output directory to `public` and routes `/api/*` to `api/index.js`.
-2. Go to **Storage → Create Database → Neon** (free) and connect it to the project. This sets `DATABASE_URL`.
+2. Create a free MongoDB Atlas cluster, allow `0.0.0.0/0`, and add `MONGODB_URI` under **Settings → Environment Variables**.
 3. Under **Settings → Environment Variables**, add the same variables as Netlify step 4.
 4. Redeploy.
 

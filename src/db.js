@@ -1,197 +1,416 @@
-// Postgres (Neon) data layer — works on Netlify Functions, Vercel Functions and locally.
-const { neon } = require('@neondatabase/serverless');
+// Bookings store. MongoDB Atlas when MONGODB_URI is set; otherwise a local file
+// (data/store.json) so registration works on this computer. Serverless hosts have
+// no disk, so they keep the "opening soon" response until Atlas is connected.
+const fs = require('fs');
+const path = require('path');
 
-const DATABASE_URL = process.env.DATABASE_URL || process.env.NETLIFY_DATABASE_URL || process.env.POSTGRES_URL;
 const HOLD_MINUTES = Math.max(1, Math.floor(Number(process.env.HOLD_MINUTES || 20)));
-
-const configured = () => Boolean(DATABASE_URL);
-
-let sql = null;
-function client() {
-  if (!DATABASE_URL) {
-    console.error('[db] DATABASE_URL is not set — connect a Neon Postgres database.');
-    throw Object.assign(new Error('Registrations are opening soon. Please try again in a little while.'), { status: 503, expose: true });
-  }
-  return (sql ||= neon(DATABASE_URL));
-}
-const query = (text, params = []) => client().query(text, params);
-const one = async (text, params) => (await query(text, params))[0] || null;
-
-// ---------- schema (created automatically on first use) ----------
-const SCHEMA = [
-  `CREATE TABLE IF NOT EXISTS events (
-    id            SERIAL PRIMARY KEY,
-    title         TEXT NOT NULL,
-    description   TEXT NOT NULL DEFAULT '',
-    venue         TEXT NOT NULL DEFAULT '',
-    map_url       TEXT NOT NULL DEFAULT '',
-    event_date    TEXT NOT NULL,
-    poster_url    TEXT NOT NULL DEFAULT '',
-    what_to_bring TEXT NOT NULL DEFAULT '',
-    published     INTEGER NOT NULL DEFAULT 1,
-    created_at    TIMESTAMPTZ NOT NULL DEFAULT now())`,
-  `CREATE TABLE IF NOT EXISTS slots (
-    id          SERIAL PRIMARY KEY,
-    event_id    INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
-    label       TEXT NOT NULL DEFAULT '',
-    start_time  TEXT NOT NULL,
-    end_time    TEXT NOT NULL,
-    capacity    INTEGER NOT NULL,
-    price       INTEGER NOT NULL DEFAULT 0)`,
-  `CREATE TABLE IF NOT EXISTS bookings (
-    id                 SERIAL PRIMARY KEY,
-    order_id           TEXT NOT NULL UNIQUE,
-    slot_id            INTEGER NOT NULL REFERENCES slots(id),
-    name               TEXT NOT NULL,
-    email              TEXT NOT NULL,
-    phone              TEXT NOT NULL,
-    amount             INTEGER NOT NULL,
-    status             TEXT NOT NULL DEFAULT 'pending',
-    payment_session_id TEXT,
-    cf_payment_id      TEXT,
-    ticket_token       TEXT UNIQUE,
-    email_sent_at      TIMESTAMPTZ,
-    email_error        TEXT,
-    checked_in_at      TIMESTAMPTZ,
-    created_at         TIMESTAMPTZ NOT NULL DEFAULT now(),
-    paid_at            TIMESTAMPTZ)`,
-  `CREATE INDEX IF NOT EXISTS idx_bookings_slot ON bookings(slot_id, status)`,
-  `CREATE INDEX IF NOT EXISTS idx_bookings_email ON bookings(lower(email))`,
-];
-let schemaReady = null;
-function ensureSchema() {
-  return (schemaReady ||= (async () => {
-    for (const s of SCHEMA) await query(s);
-    await seedHardcodedMeetups();
-  })().catch((e) => { schemaReady = null; throw e; }));
-}
-
-/** First run on an empty database: copy the hard-coded meetups in, keeping their ids so links stay the same. */
-async function seedHardcodedMeetups() {
-  const { n } = await one(`SELECT COUNT(*)::int AS n FROM events`);
-  if (n > 0) return;
-  const meetups = require('./meetups');
-  for (const e of meetups) {
-    await query(`INSERT INTO events (id, ${EVENT_COLS.join(', ')}) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9) ON CONFLICT (id) DO NOTHING`,
-      [e.id, ...EVENT_COLS.map((k) => e[k])]);
-    for (const s of e.slots) {
-      await query(`INSERT INTO slots (id, event_id, ${SLOT_COLS.join(', ')}) VALUES ($1,$2,$3,$4,$5,$6,$7) ON CONFLICT (id) DO NOTHING`,
-        [s.id, e.id, ...SLOT_COLS.map((k) => s[k])]);
-    }
-  }
-  // keep the id counters ahead of the ids we inserted by hand
-  await query(`SELECT setval(pg_get_serial_sequence('events', 'id'), GREATEST((SELECT MAX(id) FROM events), 1))`);
-  await query(`SELECT setval(pg_get_serial_sequence('slots', 'id'), GREATEST((SELECT MAX(id) FROM slots), 1))`);
-  console.log(`[db] added ${meetups.length} hard-coded meetup(s) to the empty database`);
-}
-
-// seats held = paid + recent unpaid (someone is on the payment page)
-const takenSql = `(SELECT COUNT(*)::int FROM bookings b WHERE b.slot_id = s.id AND
-   (b.status = 'paid' OR (b.status = 'pending' AND b.created_at > now() - interval '${HOLD_MINUTES} minutes')))`;
-
-const fullBookingSql = `SELECT b.*, s.label AS slot_label, s.start_time, s.end_time, s.price,
-    e.id AS event_id, e.title AS event_title, e.event_date, e.venue, e.map_url, e.what_to_bring
-  FROM bookings b JOIN slots s ON s.id = b.slot_id JOIN events e ON e.id = s.event_id`;
+const MONGODB_URI = process.env.MONGODB_URI || process.env.MONGO_URL || '';
+const serverless = Boolean(process.env.VERCEL || process.env.NETLIFY || process.env.AWS_LAMBDA_FUNCTION_NAME);
+const FILE = path.join(__dirname, '..', 'data', 'store.json');
 
 const EVENT_COLS = ['title', 'description', 'venue', 'map_url', 'event_date', 'poster_url', 'what_to_bring', 'published'];
 const SLOT_COLS = ['label', 'start_time', 'end_time', 'capacity', 'price'];
 
-const q = {
-  // events
-  publicEvents: { all: (today) => query(`SELECT * FROM events WHERE published = 1 AND event_date >= $1 ORDER BY event_date`, [today]) },
-  allEvents: { all: () => query(`SELECT * FROM events ORDER BY event_date DESC`) },
-  event: { get: (id) => one(`SELECT * FROM events WHERE id = $1`, [Number(id)]) },
-  insertEvent: {
-    run: async (e) => ({ lastInsertRowid: (await one(
-      `INSERT INTO events (${EVENT_COLS.join(', ')}) VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id`, EVENT_COLS.map((k) => e[k]))).id }),
-  },
-  updateEvent: {
-    run: (e) => query(`UPDATE events SET ${EVENT_COLS.map((k, i) => `${k} = $${i + 1}`).join(', ')} WHERE id = $9`, [...EVENT_COLS.map((k) => e[k]), e.id]),
-  },
-  deleteEvent: { run: (id) => query(`DELETE FROM events WHERE id = $1`, [Number(id)]) },
+const configured = () => Boolean(MONGODB_URI) || !serverless;
 
-  // slots
-  slotsForEvent: {
-    all: (eventId) => query(`SELECT s.*, ${takenSql} AS taken,
-        (SELECT COUNT(*)::int FROM bookings b WHERE b.slot_id = s.id AND b.status = 'paid') AS paid,
-        (SELECT COUNT(*)::int FROM bookings b WHERE b.slot_id = s.id AND b.status = 'paid' AND b.checked_in_at IS NOT NULL) AS checked_in
-      FROM slots s WHERE s.event_id = $1 ORDER BY s.start_time`, [Number(eventId)]),
-  },
-  slot: { get: (id) => one(`SELECT s.*, ${takenSql} AS taken FROM slots s WHERE s.id = $1`, [Number(id)]) },
-  insertSlot: {
-    run: async (s) => ({ lastInsertRowid: (await one(
-      `INSERT INTO slots (event_id, ${SLOT_COLS.join(', ')}) VALUES ($1,$2,$3,$4,$5,$6) RETURNING id`, [s.event_id, ...SLOT_COLS.map((k) => s[k])])).id }),
-  },
-  updateSlot: {
-    run: (s) => query(`UPDATE slots SET ${SLOT_COLS.map((k, i) => `${k} = $${i + 1}`).join(', ')} WHERE id = $6`, [...SLOT_COLS.map((k) => s[k]), s.id]),
-  },
-  deleteSlot: { run: (id) => query(`DELETE FROM slots WHERE id = $1`, [Number(id)]) },
-  paidCountForSlot: { get: (id) => one(`SELECT COUNT(*)::int AS n FROM bookings WHERE slot_id = $1 AND status = 'paid'`, [Number(id)]) },
-  paidCountForEvent: {
-    get: (id) => one(`SELECT COUNT(*)::int AS n FROM bookings b JOIN slots s ON s.id = b.slot_id WHERE s.event_id = $1 AND b.status = 'paid'`, [Number(id)]),
-  },
-  deleteUnpaidForSlot: { run: (id) => query(`DELETE FROM bookings WHERE slot_id = $1 AND status != 'paid'`, [Number(id)]) },
-  deleteUnpaidForEvent: {
-    run: (id) => query(`DELETE FROM bookings WHERE status != 'paid' AND slot_id IN (SELECT id FROM slots WHERE event_id = $1)`, [Number(id)]),
-  },
+function unavailable() {
+  console.error('[db] MONGODB_URI is not set — connect MongoDB Atlas.');
+  throw Object.assign(new Error('Registrations are opening soon. Please try again in a little while.'), { status: 503, expose: true });
+}
 
-  // bookings
-  setSession: { run: (sessionId, orderId) => query(`UPDATE bookings SET payment_session_id = $1 WHERE order_id = $2`, [sessionId, orderId]) },
-  bookingByOrder: { get: (orderId) => one(`SELECT * FROM bookings WHERE order_id = $1`, [orderId]) },
-  bookingById: { get: (id) => one(`SELECT * FROM bookings WHERE id = $1`, [Number(id)]) },
-  bookingByToken: { get: (token) => one(`SELECT * FROM bookings WHERE ticket_token = $1`, [token]) },
-  paidForEmailSlot: {
-    get: (slotId, email) => one(`SELECT id FROM bookings WHERE slot_id = $1 AND lower(email) = lower($2) AND status = 'paid'`, [Number(slotId), email]),
+const nowIso = () => new Date().toISOString();
+const holding = (b, now = Date.now()) =>
+  b.status === 'paid' || (b.status === 'pending' && Date.parse(b.created_at) > now - HOLD_MINUTES * 60 * 1000);
+
+function pick(src, cols) {
+  const out = {};
+  for (const k of cols) out[k] = src[k];
+  return out;
+}
+
+function clean(doc) {
+  if (!doc) return null;
+  const { _id, ...rest } = doc;
+  return rest;
+}
+
+function slotStats(slot, bookings) {
+  const rows = bookings.filter((b) => b.slot_id === slot.id);
+  return {
+    ...clean(slot),
+    taken: rows.filter((b) => holding(b)).length,
+    paid: rows.filter((b) => b.status === 'paid').length,
+    checked_in: rows.filter((b) => b.status === 'paid' && b.checked_in_at).length,
+  };
+}
+
+function joinBooking(b, slots, events) {
+  const s = slots.find((x) => x.id === b.slot_id);
+  const e = s && events.find((x) => x.id === s.event_id);
+  return {
+    ...clean(b),
+    slot_label: s ? s.label : '',
+    start_time: s && s.start_time,
+    end_time: s && s.end_time,
+    price: s && s.price,
+    event_id: e && e.id,
+    event_title: e && e.title,
+    event_date: e && e.event_date,
+    venue: e && e.venue,
+    map_url: e && e.map_url,
+    what_to_bring: e && e.what_to_bring,
+  };
+}
+
+// ---------- local file ----------
+function emptyStore() {
+  return { events: [], slots: [], bookings: [], seq: { events: 0, slots: 0, bookings: 0 } };
+}
+
+let fileQueue = Promise.resolve();
+function withFile(fn) {
+  const run = fileQueue.then(async () => {
+    let store = emptyStore();
+    try { store = JSON.parse(fs.readFileSync(FILE, 'utf8')); } catch { /* first run */ }
+    const result = await fn(store);
+    fs.mkdirSync(path.dirname(FILE), { recursive: true });
+    const tmp = `${FILE}.tmp`;
+    fs.writeFileSync(tmp, JSON.stringify(store));
+    fs.renameSync(tmp, FILE);
+    return result;
+  });
+  fileQueue = run.then(() => {}, () => {});
+  return run;
+}
+
+function nextId(store, key) {
+  store.seq[key] = (store.seq[key] || 0) + 1;
+  return store.seq[key];
+}
+function noteId(store, key, id) {
+  store.seq[key] = Math.max(store.seq[key] || 0, id);
+}
+
+const fileBackend = {
+  async snapshot() {
+    return withFile(async (store) => ({
+      events: store.events.map(clean),
+      slots: store.slots.map(clean),
+      bookings: store.bookings.map(clean),
+    }));
   },
-  /** Returns { changes } like SQLite did, so callers can tell if this call flipped it to paid. */
-  markPaid: {
-    run: async (token, cfPaymentId, orderId) => ({
-      changes: (await query(`UPDATE bookings SET status = 'paid', paid_at = now(), ticket_token = $1, cf_payment_id = $2
-        WHERE order_id = $3 AND status != 'paid' RETURNING id`, [token, cfPaymentId, orderId])).length,
-    }),
+  async seed(meetups) {
+    return withFile(async (store) => {
+      if (store.events.length) return false;
+      for (const e of meetups) {
+        store.events.push({ id: e.id, ...pick(e, EVENT_COLS), created_at: nowIso() });
+        noteId(store, 'events', e.id);
+        for (const s of e.slots) {
+          store.slots.push({ id: s.id, event_id: e.id, ...pick(s, SLOT_COLS) });
+          noteId(store, 'slots', s.id);
+        }
+      }
+      return true;
+    });
   },
-  markFailed: { run: (orderId) => query(`UPDATE bookings SET status = 'failed' WHERE order_id = $1 AND status = 'pending'`, [orderId]) },
-  emailOk: { run: (id) => query(`UPDATE bookings SET email_sent_at = now(), email_error = NULL WHERE id = $1`, [id]) },
-  emailErr: { run: (msg, id) => query(`UPDATE bookings SET email_error = $1 WHERE id = $2`, [msg, id]) },
-  checkIn: {
-    run: async (id) => ({
-      changes: (await query(`UPDATE bookings SET checked_in_at = now() WHERE id = $1 AND status = 'paid' AND checked_in_at IS NULL RETURNING id`, [Number(id)])).length,
-    }),
+  async insertEvent(fields) {
+    return withFile(async (store) => {
+      const id = nextId(store, 'events');
+      store.events.push({ id, ...fields, created_at: nowIso() });
+      return id;
+    });
   },
-  undoCheckIn: { run: (id) => query(`UPDATE bookings SET checked_in_at = NULL WHERE id = $1`, [Number(id)]) },
-  fullBooking: { get: (id) => one(`${fullBookingSql} WHERE b.id = $1`, [Number(id)]) },
+  async updateEvent(id, fields) {
+    return withFile(async (store) => {
+      const e = store.events.find((x) => x.id === id);
+      if (e) Object.assign(e, fields);
+    });
+  },
+  async deleteEvent(id) {
+    return withFile(async (store) => {
+      store.events = store.events.filter((e) => e.id !== id);
+      store.slots = store.slots.filter((s) => s.event_id !== id);
+    });
+  },
+  async insertSlot(fields) {
+    return withFile(async (store) => {
+      const id = nextId(store, 'slots');
+      store.slots.push({ id, ...fields });
+      return id;
+    });
+  },
+  async updateSlot(id, fields) {
+    return withFile(async (store) => {
+      const s = store.slots.find((x) => x.id === id);
+      if (s) Object.assign(s, fields);
+    });
+  },
+  async deleteSlot(id) {
+    return withFile(async (store) => { store.slots = store.slots.filter((s) => s.id !== id); });
+  },
+  async insertIfSeat(b) {
+    return withFile(async (store) => {
+      const slot = store.slots.find((s) => s.id === b.slot_id);
+      if (!slot) return false;
+      const taken = store.bookings.filter((x) => x.slot_id === b.slot_id && holding(x)).length;
+      if (taken >= slot.capacity) return false;
+      store.bookings.push({
+        id: nextId(store, 'bookings'),
+        order_id: b.order_id, slot_id: b.slot_id, name: b.name, email: b.email, phone: b.phone,
+        amount: b.amount, status: 'pending', created_at: nowIso(),
+      });
+      return true;
+    });
+  },
+  async updateBooking(match, fields) {
+    return withFile(async (store) => {
+      const rows = store.bookings.filter(match);
+      for (const row of rows) Object.assign(row, fields);
+      return rows.length;
+    });
+  },
+  async deleteBookings(match) {
+    return withFile(async (store) => { store.bookings = store.bookings.filter((b) => !match(b)); });
+  },
 };
 
-/**
- * Inserts a pending booking only if the slot still has a free seat.
- * The advisory lock makes concurrent requests for the same slot take turns, so the last seat can't be sold twice.
- * Returns true if the seat was taken, false if the slot was full.
- */
+// ---------- MongoDB Atlas ----------
+let mongoClient = null;
+async function mongoDb() {
+  if (!MONGODB_URI) unavailable();
+  if (!mongoClient) {
+    const { MongoClient } = require('mongodb');
+    mongoClient = new MongoClient(MONGODB_URI);
+    await mongoClient.connect();
+  }
+  let name = 'dotsintoline';
+  try {
+    const parsed = new URL(MONGODB_URI.replace(/^mongodb(\+srv)?:/, 'http:'));
+    const fromPath = decodeURIComponent(parsed.pathname.replace(/^\//, '').split('/')[0] || '');
+    if (fromPath) name = fromPath;
+  } catch { /* default name */ }
+  return mongoClient.db(name);
+}
+
+async function nextMongoId(db, key, session) {
+  const result = await db.collection('counters').findOneAndUpdate(
+    { _id: key },
+    { $inc: { n: 1 } },
+    { upsert: true, returnDocument: 'after', session },
+  );
+  const doc = result && Object.prototype.hasOwnProperty.call(result, 'value') ? result.value : result;
+  return doc.n;
+}
+
+const mongoBackend = {
+  async snapshot() {
+    const db = await mongoDb();
+    const [events, slots, bookings] = await Promise.all([
+      db.collection('events').find({}).toArray(),
+      db.collection('slots').find({}).toArray(),
+      db.collection('bookings').find({}).toArray(),
+    ]);
+    return { events: events.map(clean), slots: slots.map(clean), bookings: bookings.map(clean) };
+  },
+  async seed(meetups) {
+    const db = await mongoDb();
+    const events = db.collection('events');
+    if (await events.countDocuments()) return false;
+    const slots = db.collection('slots');
+    if (meetups.length) {
+      await events.insertMany(meetups.map((e) => ({ _id: e.id, id: e.id, ...pick(e, EVENT_COLS), created_at: nowIso() })));
+      const slotDocs = meetups.flatMap((e) => e.slots.map((s) => ({ _id: s.id, id: s.id, event_id: e.id, ...pick(s, SLOT_COLS) })));
+      if (slotDocs.length) await slots.insertMany(slotDocs);
+    }
+    const max = (rows) => rows.reduce((n, row) => Math.max(n, row.id), 0);
+    await db.collection('counters').bulkWrite([
+      { updateOne: { filter: { _id: 'events' }, update: { $max: { n: max(meetups) } }, upsert: true } },
+      { updateOne: { filter: { _id: 'slots' }, update: { $max: { n: max(meetups.flatMap((e) => e.slots)) } }, upsert: true } },
+      { updateOne: { filter: { _id: 'bookings' }, update: { $max: { n: 0 } }, upsert: true } },
+    ]);
+    await db.collection('bookings').createIndex({ order_id: 1 }, { unique: true });
+    await db.collection('bookings').createIndex({ ticket_token: 1 }, { unique: true, sparse: true });
+    await db.collection('bookings').createIndex({ slot_id: 1, status: 1 });
+    return true;
+  },
+  async insertEvent(fields) {
+    const db = await mongoDb();
+    const id = await nextMongoId(db, 'events');
+    await db.collection('events').insertOne({ _id: id, id, ...fields, created_at: nowIso() });
+    return id;
+  },
+  async updateEvent(id, fields) {
+    const db = await mongoDb();
+    await db.collection('events').updateOne({ id }, { $set: fields });
+  },
+  async deleteEvent(id) {
+    const db = await mongoDb();
+    await db.collection('events').deleteOne({ id });
+    await db.collection('slots').deleteMany({ event_id: id });
+  },
+  async insertSlot(fields) {
+    const db = await mongoDb();
+    const id = await nextMongoId(db, 'slots');
+    await db.collection('slots').insertOne({ _id: id, id, ...fields });
+    return id;
+  },
+  async updateSlot(id, fields) {
+    const db = await mongoDb();
+    await db.collection('slots').updateOne({ id }, { $set: fields });
+  },
+  async deleteSlot(id) {
+    const db = await mongoDb();
+    await db.collection('slots').deleteOne({ id });
+  },
+  async insertIfSeat(b) {
+    const db = await mongoDb();
+    const session = mongoClient.startSession();
+    const flag = { ok: false };
+    try {
+      await session.withTransaction(async () => {
+        flag.ok = false;
+        const slot = await db.collection('slots').findOne({ id: b.slot_id }, { session });
+        if (!slot) return;
+        const rows = await db.collection('bookings').find({ slot_id: b.slot_id }, { session }).toArray();
+        if (rows.filter((row) => holding(row)).length >= slot.capacity) return;
+        const id = await nextMongoId(db, 'bookings', session);
+        await db.collection('bookings').insertOne({
+          _id: id, id,
+          order_id: b.order_id, slot_id: b.slot_id, name: b.name, email: b.email, phone: b.phone,
+          amount: b.amount, status: 'pending', created_at: nowIso(),
+        }, { session });
+        flag.ok = true;
+      });
+    } finally {
+      await session.endSession();
+    }
+    return flag.ok;
+  },
+  async updateBooking(match, fields) {
+    const db = await mongoDb();
+    const rows = (await db.collection('bookings').find({}).toArray()).filter(match);
+    if (!rows.length) return 0;
+    const result = await db.collection('bookings').updateMany({ id: { $in: rows.map((r) => r.id) } }, { $set: fields });
+    return result.modifiedCount;
+  },
+  async deleteBookings(match) {
+    const db = await mongoDb();
+    const rows = (await db.collection('bookings').find({}).toArray()).filter(match);
+    if (!rows.length) return;
+    await db.collection('bookings').deleteMany({ id: { $in: rows.map((r) => r.id) } });
+  },
+};
+
+const backend = () => (MONGODB_URI ? mongoBackend : fileBackend);
+
+let schemaReady = null;
+function ensureSchema() {
+  if (!configured()) return Promise.reject(unavailable());
+  return (schemaReady ||= (async () => {
+    const added = await backend().seed(require('./meetups'));
+    if (added) console.log('[db] added hard-coded meetup(s) to the empty database');
+  })().catch((e) => { schemaReady = null; throw e; }));
+}
+
+async function snap() {
+  if (!configured()) unavailable();
+  await ensureSchema();
+  return backend().snapshot();
+}
+
+const q = {
+  publicEvents: { all: async (today) => (await snap()).events.filter((e) => e.published === 1 && e.event_date >= today).sort((a, b) => a.event_date.localeCompare(b.event_date)) },
+  allEvents: { all: async () => (await snap()).events.slice().sort((a, b) => b.event_date.localeCompare(a.event_date)) },
+  event: { get: async (id) => (await snap()).events.find((e) => e.id === Number(id)) || null },
+  insertEvent: { run: async (e) => ({ lastInsertRowid: await backend().insertEvent(pick(e, EVENT_COLS)) }) },
+  updateEvent: { run: (e) => backend().updateEvent(Number(e.id), pick(e, EVENT_COLS)) },
+  deleteEvent: { run: (id) => backend().deleteEvent(Number(id)) },
+
+  slotsForEvent: {
+    all: async (eventId) => {
+      const { slots, bookings } = await snap();
+      return slots.filter((s) => s.event_id === Number(eventId)).sort((a, b) => a.start_time.localeCompare(b.start_time)).map((s) => slotStats(s, bookings));
+    },
+  },
+  slot: {
+    get: async (id) => {
+      const { slots, bookings } = await snap();
+      const s = slots.find((x) => x.id === Number(id));
+      return s ? slotStats(s, bookings) : null;
+    },
+  },
+  insertSlot: { run: async (s) => ({ lastInsertRowid: await backend().insertSlot({ event_id: Number(s.event_id), ...pick(s, SLOT_COLS) }) }) },
+  updateSlot: { run: (s) => backend().updateSlot(Number(s.id), pick(s, SLOT_COLS)) },
+  deleteSlot: { run: (id) => backend().deleteSlot(Number(id)) },
+  paidCountForSlot: { get: async (id) => ({ n: (await snap()).bookings.filter((b) => b.slot_id === Number(id) && b.status === 'paid').length }) },
+  paidCountForEvent: {
+    get: async (id) => {
+      const { slots, bookings } = await snap();
+      const ids = new Set(slots.filter((s) => s.event_id === Number(id)).map((s) => s.id));
+      return { n: bookings.filter((b) => ids.has(b.slot_id) && b.status === 'paid').length };
+    },
+  },
+  deleteUnpaidForSlot: { run: (id) => backend().deleteBookings((b) => b.slot_id === Number(id) && b.status !== 'paid') },
+  deleteUnpaidForEvent: {
+    run: async (id) => {
+      const { slots } = await snap();
+      const ids = new Set(slots.filter((s) => s.event_id === Number(id)).map((s) => s.id));
+      return backend().deleteBookings((b) => ids.has(b.slot_id) && b.status !== 'paid');
+    },
+  },
+
+  setSession: { run: (sessionId, orderId) => backend().updateBooking((b) => b.order_id === orderId, { payment_session_id: sessionId }) },
+  bookingByOrder: { get: async (orderId) => (await snap()).bookings.find((b) => b.order_id === orderId) || null },
+  bookingById: { get: async (id) => (await snap()).bookings.find((b) => b.id === Number(id)) || null },
+  bookingByToken: { get: async (token) => (await snap()).bookings.find((b) => b.ticket_token === token) || null },
+  paidForEmailSlot: {
+    get: async (slotId, email) => (await snap()).bookings.find((b) => b.slot_id === Number(slotId) && b.email.toLowerCase() === String(email).toLowerCase() && b.status === 'paid') || null,
+  },
+  markPaid: {
+    run: (token, cfPaymentId, orderId) => backend().updateBooking(
+      (b) => b.order_id === orderId && b.status !== 'paid',
+      { status: 'paid', paid_at: nowIso(), ticket_token: token, cf_payment_id: cfPaymentId },
+    ).then((changes) => ({ changes })),
+  },
+  markFailed: { run: (orderId) => backend().updateBooking((b) => b.order_id === orderId && b.status === 'pending', { status: 'failed' }) },
+  emailOk: { run: (id) => backend().updateBooking((b) => b.id === Number(id), { email_sent_at: nowIso(), email_error: null }) },
+  emailErr: { run: (msg, id) => backend().updateBooking((b) => b.id === Number(id), { email_error: msg }) },
+  checkIn: {
+    run: (id) => backend().updateBooking(
+      (b) => b.id === Number(id) && b.status === 'paid' && !b.checked_in_at,
+      { checked_in_at: nowIso() },
+    ).then((changes) => ({ changes })),
+  },
+  undoCheckIn: { run: (id) => backend().updateBooking((b) => b.id === Number(id), { checked_in_at: null }) },
+  fullBooking: {
+    get: async (id) => {
+      const { events, slots, bookings } = await snap();
+      const b = bookings.find((x) => x.id === Number(id));
+      return b ? joinBooking(b, slots, events) : null;
+    },
+  },
+};
+
 async function insertBookingIfSeat(b) {
-  const sql = client();
-  const [, inserted] = await sql.transaction([
-    sql.query(`SELECT pg_advisory_xact_lock(42, $1)`, [b.slot_id]),
-    sql.query(`INSERT INTO bookings (order_id, slot_id, name, email, phone, amount, status)
-      SELECT $1, s.id, $2, $3, $4, $5, 'pending' FROM slots s WHERE s.id = $6 AND ${takenSql} < s.capacity
-      RETURNING id`, [b.order_id, b.name, b.email, b.phone, b.amount, b.slot_id]),
-  ]);
-  return inserted.length > 0;
+  if (!configured()) unavailable();
+  await ensureSchema();
+  return backend().insertIfSeat(b);
 }
 
 async function searchBookings({ eventId, status, search }) {
-  const where = [];
-  const params = [];
-  const p = (v) => { params.push(v); return `$${params.length}`; };
-  if (eventId) where.push(`e.id = ${p(Number(eventId))}`);
-  if (status === 'checked_in') where.push(`b.status = 'paid' AND b.checked_in_at IS NOT NULL`);
-  else if (status === 'not_checked_in') where.push(`b.status = 'paid' AND b.checked_in_at IS NULL`);
-  else if (status) where.push(`b.status = ${p(status)}`);
+  const { events, slots, bookings } = await snap();
+  let rows = bookings.map((b) => joinBooking(b, slots, events));
+  if (eventId) rows = rows.filter((r) => r.event_id === Number(eventId));
+  if (status === 'checked_in') rows = rows.filter((r) => r.status === 'paid' && r.checked_in_at);
+  else if (status === 'not_checked_in') rows = rows.filter((r) => r.status === 'paid' && !r.checked_in_at);
+  else if (status) rows = rows.filter((r) => r.status === status);
   if (search) {
-    const s = p(`%${search}%`);
-    where.push(`(b.name ILIKE ${s} OR b.email ILIKE ${s} OR b.phone ILIKE ${s} OR b.order_id ILIKE ${s} OR b.ticket_token ILIKE ${s})`);
+    const s = search.toLowerCase();
+    rows = rows.filter((r) => [r.name, r.email, r.phone, r.order_id, r.ticket_token].some((v) => String(v || '').toLowerCase().includes(s)));
   }
-  return query(`${fullBookingSql} ${where.length ? 'WHERE ' + where.join(' AND ') : ''}
-    ORDER BY e.event_date DESC, s.start_time, b.created_at DESC LIMIT 2000`, params);
+  rows.sort((a, b) => b.event_date.localeCompare(a.event_date) || a.start_time.localeCompare(b.start_time) || String(b.created_at).localeCompare(String(a.created_at)));
+  return rows.slice(0, 2000);
 }
 
-module.exports = { q, query, configured, ensureSchema, insertBookingIfSeat, searchBookings, HOLD_MINUTES };
+module.exports = { q, configured, ensureSchema, insertBookingIfSeat, searchBookings, HOLD_MINUTES };

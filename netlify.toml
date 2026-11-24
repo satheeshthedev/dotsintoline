@@ -3,6 +3,11 @@
   functions = "netlify/functions"
   command = ""
 
+# These values are public site text, not credentials. Netlify's secret scan
+# fails the build when it sees them in the repo.
+[build.environment]
+  SECRETS_SCAN_OMIT_KEYS = "CASHFREE_ENV,INSTAGRAM_URL,MAIL_FROM_NAME"
+
 [functions]
   node_bundler = "esbuild"
   included_files = ["src/**"]

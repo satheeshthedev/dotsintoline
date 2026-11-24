@@ -13,9 +13,9 @@
     "node": ">=22.13"
   },
   "dependencies": {
-    "@neondatabase/serverless": "^1.2.1",
     "dotenv": "^18.0.10",
     "express": "^4.22.3",
+    "mongodb": "^6.22.0",
     "qrcode": "^1.5.4",
     "serverless-http": "^4.0.0"
   }
