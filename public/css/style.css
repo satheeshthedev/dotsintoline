@@ -468,3 +468,20 @@ a.slot:hover .slot-cta { animation: none; }
 .hero h1 + .doodle { display: block; margin: 0 0 10px; width: min(300px, 100%); }
 .hero h1 { margin-bottom: 0; }
 .hero h1 + .doodle { margin-top: -4px; }
+
+/* Pay button: livelier — faster, brighter shine, pulsing red ring, gentle breathing */
+#pay-btn:not(:disabled) { animation: pay-pulse 1.8s ease-out infinite, pay-breathe 1.8s ease-in-out infinite; }
+#pay-btn:not(:disabled)::after {
+  background: linear-gradient(110deg, transparent 25%, rgba(255, 255, 255, .6) 50%, transparent 75%);
+  animation-duration: 2.2s;
+}
+#pay-btn:not(:disabled) .arrow { animation-duration: 1s; }
+#pay-btn:hover:not(:disabled) { animation: none; }
+@keyframes pay-pulse {
+  0% { box-shadow: 3px 3px 0 var(--ink), 0 0 0 0 rgba(224, 83, 60, .55); }
+  70%, 100% { box-shadow: 3px 3px 0 var(--ink), 0 0 0 16px rgba(224, 83, 60, 0); }
+}
+@keyframes pay-breathe { 50% { scale: 1.025; } }
+@media (prefers-reduced-motion: reduce) {
+  #pay-btn, #pay-btn::after, #pay-btn .arrow { animation: none !important; }
+}
